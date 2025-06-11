@@ -1,0 +1,103 @@
+services:
+  coffeechain-mock:
+    build: ./mocks/coffeechain
+    container_name: coffeechain-api
+    ports:
+      - "8001:80"
+    environment:
+      - API_NAME=CoffeeChain
+      - LOG_LEVEL=INFO
+    networks:
+      - loyalty-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  telcocorp-mock:
+    build: ./mocks/telcocorp
+    container_name: telcocorp-api
+    ports:
+      - "8002:80"
+    environment:
+      - API_NAME=TelcoCorp
+      - LOG_LEVEL=INFO
+    networks:
+      - loyalty-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  fintechapp-mock:
+    build: ./mocks/fintechapp
+    container_name: fintechapp-api
+    ports:
+      - "8003:80"
+    environment:
+      - API_NAME=FintechApp
+      - LOG_LEVEL=INFO
+    networks:
+      - loyalty-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  mysql:
+    image: mysql:8.0
+    container_name: mysql-db
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_DATABASE: loyalty_db
+      MYSQL_USER: testuser
+      MYSQL_PASSWORD: pass@word1
+      MYSQL_ROOT_PASSWORD: root
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - loyalty-network
+    healthcheck:
+      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+    container_name: django-backend
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py seed_tenants &&
+             python manage.py runserver 0.0.0.0:8000"
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend/.env
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - loyalty-network
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/api/v1/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  loyalty-network:
+    driver: bridge
+
+volumes:
+  mysql_data:
