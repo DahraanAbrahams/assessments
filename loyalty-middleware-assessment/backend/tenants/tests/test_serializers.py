@@ -6,7 +6,7 @@ class TenantSerializerTests(unittest.TestCase):
     """
     Unit tests for the TenantSerializer using Python's built-in unittest library.
 
-    These tests validate the behavior of the serializer under different `config` inputs,
+    These tests validate the behaviour of the serializer under different `config` inputs,
     including valid JSON objects and malformed types.
     """
 

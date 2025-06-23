@@ -8,7 +8,7 @@ class BookingSearchHandlerTests(TestCase):
     """
     Unit tests for BookingSearchHandler endpoint.
 
-    Tests search behavior using partial `member_id` matches,
+    Tests search behaviour using partial `member_id` matches,
     scoped per tenant.
     """
 

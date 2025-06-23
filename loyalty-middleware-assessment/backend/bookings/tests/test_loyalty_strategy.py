@@ -10,7 +10,7 @@ from utils.rfc7807 import ProblemDetailException
 
 class LoyaltyStrategyRefundTests(TestCase):
     """
-    Tests for refund_points behavior across tenant loyalty strategies.
+    Tests for refund_points behaviour across tenant loyalty strategies.
     """
 
     def setUp(self):

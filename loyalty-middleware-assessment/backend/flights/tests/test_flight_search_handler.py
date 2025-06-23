@@ -19,7 +19,7 @@ class FlightSearchHandlerTests(APITestCase):
     - Valid search
     - Missing tenant
     - Invalid input payloads
-    - Caching behavior
+    - Caching behaviour
     """
 
     def setUp(self):

@@ -42,6 +42,7 @@ urlpatterns = [
     path("api/v1/tenants/", include("tenants.urls")),
     path("api/", include("bookings.urls")),
     path("api/v1/flights/", include("flights.urls")),
+    path("api/v1/admin/", include("bookings.admin.urls")),
 
     # Swagger/OpenAPI endpoints
     re_path(r"^swagger(?P<format>\.json|\.yaml)$", schema_view.without_ui(cache_timeout=0), name="schema-json"),

@@ -1,7 +1,5 @@
 from django.db import transaction
 from django.utils import timezone
-from django.core.paginator import Paginator, EmptyPage
-from django.utils.dateparse import parse_date
 from drf_yasg.utils import swagger_auto_schema
 
 from rest_framework.views import APIView
@@ -10,12 +8,14 @@ from rest_framework import status
 from rest_framework.request import Request
 
 from bookings.models import Booking
-from bookings.serializers import BookingDetailSerializer, BookingCreateSerializer
+from bookings.serializers import BookingDetailSerializer, BookingCreateSerializer, BookingCancelSerializer
 from bookings.services.strategies.resolver import get_loyalty_strategy
 from bookings.utils.booking_logic import build_booking_payload, validate_flight_offer, extract_flight_metadata, \
     parse_auth_headers
 from bookings.utils.generate_ref import generate_booking_reference
+from bookings.utils.query_filters import filter_and_paginate_bookings
 from utils.docs.swagger_headers import TENANT_HEADERS
+from utils.docs.swagger_query_params import BOOKING_QUERY_PARAMS, SEARCH_QUERY_PARAM
 from utils.exceptions import ProblemDetailException
 from utils.rfc7807 import validation_error, not_found_error, service_unavailable_error
 
@@ -29,37 +29,10 @@ class BookingHandler(APIView):
         - POST: Create a booking using live Duffel offer verification and tenant-specific rules.
     """
 
-    def get_queryset(self, request: Request):
-        """
-        Retrieve bookings scoped to the current tenant, applying optional filters.
-
-        Args:
-            request (Request): The HTTP request with tenant context.
-
-        Returns:
-            QuerySet[Booking]: Filtered queryset of bookings.
-        """
-        tenant = request.tenant
-        qs = Booking.objects.filter(tenant=tenant).order_by("-created_at")
-
-        status_filter = request.query_params.get("status")
-        from_date = parse_date(request.query_params.get("from_date") or "")
-        to_date = parse_date(request.query_params.get("to_date") or "")
-
-        if status_filter:
-            qs = qs.filter(status=status_filter)
-        if from_date:
-            qs = qs.filter(created_at__date__gte=from_date)
-        if to_date:
-            qs = qs.filter(created_at__date__lte=to_date)
-
-        return qs
-
     @swagger_auto_schema(
-        operation_description="Create a booking using a Duffel offer.",
-        request_body=BookingCreateSerializer,
-        responses={201: "Created", 400: "Validation error"},
-        manual_parameters=TENANT_HEADERS,
+        operation_description="List bookings for a tenant with optional filters.",
+        manual_parameters=TENANT_HEADERS + BOOKING_QUERY_PARAMS,
+        responses={200: "OK", 400: "Validation error"},
     )
     def get(self, request: Request) -> Response:
         """
@@ -78,41 +51,28 @@ class BookingHandler(APIView):
         Returns:
             Response: Paginated list of bookings or validation error.
         """
-        qs = self.get_queryset(request)
+        base_queryset = Booking.objects.filter(tenant=request.tenant).order_by("-created_at")
+        page, metadata = filter_and_paginate_bookings(base_queryset, request)
 
-        try:
-            limit = min(int(request.query_params.get("limit", 20)), 100)
-            offset = int(request.query_params.get("offset", 0))
-        except ValueError:
+        if page is None:
             return validation_error(
-                detail="Invalid pagination parameters.",
+                detail=metadata["error"],
                 instance=request.path,
             )
-
-        paginator = Paginator(qs, limit)
-        try:
-            page = paginator.page((offset // limit) + 1)
-        except EmptyPage:
-            page = []
 
         serializer = BookingDetailSerializer(page, many=True)
         return Response({
             "data": {
                 "bookings": serializer.data,
-                "pagination": {
-                    "total": paginator.count,
-                    "limit": limit,
-                    "offset": offset,
-                    "has_more": page.has_next() if page else False,
-                }
+                "pagination": metadata,
             }
         }, status=status.HTTP_200_OK)
 
     @swagger_auto_schema(
         operation_description="Create a booking using a Duffel offer.",
         request_body=BookingCreateSerializer,
-        responses={201: "Created", 400: "Validation error"},
         manual_parameters=TENANT_HEADERS,
+        responses={201: "Created", 400: "Validation error"},
     )
     def post(self, request: Request) -> Response:
         """
@@ -137,8 +97,6 @@ class BookingHandler(APIView):
         data["tenant_id"] = tenant.id
 
         auth = parse_auth_headers(request, tenant)
-        print(f"DEBUG: Auth Dict: {auth}")
-        print("HEADERS IN:", dict(request.headers))
 
         strategy = get_loyalty_strategy(tenant, auth)
 
@@ -151,7 +109,6 @@ class BookingHandler(APIView):
             )
 
         flight_id = serializer.validated_data["flight_id"]
-        print(f"[BookingHandler] Looking up flight ID: {flight_id}")
         offer = validate_flight_offer(flight_id, request.path)
 
         origin, destination, departure_date, return_date, cabin_class = extract_flight_metadata(offer)
@@ -219,10 +176,9 @@ class BookingDetailHandler(APIView):
     """
 
     @swagger_auto_schema(
-        operation_description="Create a booking using a Duffel offer.",
-        request_body=BookingCreateSerializer,
-        responses={201: "Created", 400: "Validation error"},
+        operation_description="Retrieve booking details for a specific booking ID.",
         manual_parameters=TENANT_HEADERS,
+        responses={200: "OK", 400: "Validation error"},
     )
     def get(self, request: Request, booking_id: int) -> Response:
         """
@@ -250,36 +206,41 @@ class BookingDetailHandler(APIView):
 
 class BookingCancelHandler(APIView):
     """
-    Cancel a booking and optionally process a tenant-specific refund.
+    Cancel a booking and optionally issue a tenant-specific loyalty refund.
+
+    This handler performs the following actions:
+    - Marks the booking as cancelled.
+    - Optionally stores a cancel reason.
+    - Conditionally refunds loyalty points (if supported by tenant strategy).
+
+    This endpoint is tenant-aware and expects a valid tenant context to be attached
+    to the request via middleware.
     """
 
     @swagger_auto_schema(
-        operation_description="Create a booking using a Duffel offer.",
-        request_body=BookingCreateSerializer,
-        responses={201: "Created", 400: "Validation error"},
+        operation_description="Cancel a booking and optionally request a refund.",
+        request_body=BookingCancelSerializer,
+        responses={200: "OK", 400: "Validation error", 404: "Not found"},
         manual_parameters=TENANT_HEADERS,
     )
     def post(self, request: Request, booking_id: int) -> Response:
         """
         Cancel the specified booking and issue a refund if requested.
 
-        Request Body:
-            - reason (str, optional): Reason for cancellation.
-            - refund_requested (bool): Whether a refund should be processed.
-
         Args:
-            request (Request): DRF request object.
-            booking_id (int): ID of the booking to cancel.
+            request (Request): The HTTP request object with tenant context.
+            booking_id (int): The ID of the booking to cancel.
 
         Returns:
-            Response: Cancellation confirmation and refund info if applicable.
+            Response: A JSON response with cancellation confirmation and optional refund data.
         """
         tenant = request.tenant
+
         try:
             booking = Booking.objects.get(id=booking_id, tenant=tenant)
         except Booking.DoesNotExist:
             return not_found_error(
-                detail=f"Booking with ID '{booking_id}' not found",
+                detail=f"Booking with ID '{booking_id}' not found.",
                 instance=request.path,
             )
 
@@ -289,25 +250,25 @@ class BookingCancelHandler(APIView):
                 instance=request.path,
             )
 
-        payload = request.data
-        refund_requested = payload.get("refund_requested", False)
-
-        if not isinstance(refund_requested, bool):
+        # Validate cancellation payload
+        serializer = BookingCancelSerializer(data=request.data)
+        if not serializer.is_valid():
             return validation_error(
-                detail="Field `refund_requested` must be a boolean.",
+                detail="Invalid cancellation payload.",
                 instance=request.path,
+                extra={"errors": serializer.errors},
             )
 
-        # Optional reason handling
-        cancel_reason = payload.get("reason")
-        if cancel_reason and hasattr(booking, "cancel_reason"):
-            booking.cancel_reason = cancel_reason
+        reason = serializer.validated_data.get("reason")
+        refund_requested = serializer.validated_data.get("refund_requested", False)
 
-        # Mark as cancelled
+        if reason and hasattr(booking, "cancel_reason"):
+            booking.cancel_reason = reason
+
         booking.status = "cancelled"
         booking.cancelled_at = timezone.now()
 
-        # Attempt refund
+        # Attempt refund if requested
         if refund_requested:
             try:
                 auth = parse_auth_headers(request, tenant)
@@ -319,13 +280,13 @@ class BookingCancelHandler(APIView):
                 booking.refund_processed_at = timezone.now()
 
             except NotImplementedError:
-                # Refund not implemented — skip silently
+                # Refund not supported by tenant – silently skip
                 pass
             except ProblemDetailException as e:
                 raise e
-            except Exception as e:
+            except Exception:
                 return service_unavailable_error(
-                    detail="Unexpected error during refund",
+                    detail="Unexpected error during refund.",
                     instance=request.path,
                 )
 
@@ -355,14 +316,13 @@ class BookingCancelHandler(APIView):
 
 class BookingSearchHandler(APIView):
     """
-    Search bookings for a tenant by partial match on member ID.
+    Search bookings for a tenant by partial match on member ID, with pagination support.
     """
 
     @swagger_auto_schema(
-        operation_description="Create a booking using a Duffel offer.",
-        request_body=BookingCreateSerializer,
-        responses={201: "Created", 400: "Validation error"},
-        manual_parameters=TENANT_HEADERS,
+        operation_description="Search bookings by partial member ID match.",
+        manual_parameters=TENANT_HEADERS + SEARCH_QUERY_PARAM,
+        responses={200: "OK", 400: "Validation error"},
     )
     def get(self, request: Request) -> Response:
         """
@@ -370,12 +330,11 @@ class BookingSearchHandler(APIView):
 
         Query Parameters:
             - q (str): Substring to search for in member IDs.
-
-        Args:
-            request (Request): DRF request object.
+            - limit (int, optional): Pagination limit.
+            - offset (int, optional): Pagination offset.
 
         Returns:
-            Response: Matching bookings or validation error.
+            Response: Paginated matching bookings or validation error.
         """
         tenant = request.tenant
         query = request.query_params.get("q", "").strip()
@@ -386,10 +345,23 @@ class BookingSearchHandler(APIView):
                 instance=request.path,
             )
 
-        bookings = Booking.objects.filter(
+        base_queryset = Booking.objects.filter(
             tenant=tenant,
             member_id__icontains=query
         ).order_by("-created_at")
 
-        serializer = BookingDetailSerializer(bookings, many=True)
-        return Response({"data": {"results": serializer.data}}, status=status.HTTP_200_OK)
+        page, metadata = filter_and_paginate_bookings(base_queryset, request)
+
+        if page is None:
+            return validation_error(
+                detail=metadata["error"],
+                instance=request.path,
+            )
+
+        serializer = BookingDetailSerializer(page, many=True)
+        return Response({
+            "data": {
+                "results": serializer.data,
+                "pagination": metadata,
+            }
+        }, status=status.HTTP_200_OK)

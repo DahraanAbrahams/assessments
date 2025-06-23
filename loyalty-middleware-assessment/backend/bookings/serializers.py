@@ -100,3 +100,14 @@ class BookingDetailSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+
+class BookingCancelSerializer(serializers.Serializer):
+    """
+    Serializer for cancelling a booking and optionally requesting a refund.
+
+    Fields:
+        reason (str, optional): Reason for cancelling the booking.
+        refund_requested (bool, optional): Whether a loyalty refund should be issued.
+    """
+    reason = serializers.CharField(required=False, allow_blank=True)
+    refund_requested = serializers.BooleanField(required=False, default=False)

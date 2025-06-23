@@ -31,6 +31,7 @@ class TenantMiddleware(MiddlewareMixin):
         """
         if (
                 request.path in self.EXEMPT_PATHS or
+                request.path.startswith("/api/v1/admin/bookings/") or
                 request.path.startswith("/swagger") or
                 request.path.startswith("/redoc") or
                 request.path.startswith("/swagger.json") or

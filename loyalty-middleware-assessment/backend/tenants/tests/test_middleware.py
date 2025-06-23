@@ -8,7 +8,7 @@ class TenantMiddlewareTests(TestCase):
     """
     Unit tests for the TenantMiddleware.
 
-    These tests validate middleware behavior under different request conditions, such as:
+    These tests validate middleware behaviour under different request conditions, such as:
     - Valid tenant header
     - Missing or unknown tenant
     - Malformed config

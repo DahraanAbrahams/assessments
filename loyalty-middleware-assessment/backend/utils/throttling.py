@@ -51,7 +51,7 @@ class TenantThrottle(SimpleRateThrottle):
         # Parse into number of allowed requests and time window
         self.num_requests, self.duration = self.parse_rate(self.rate)
 
-        # Use client IP to help isolate per-user behavior within the tenant
+        # Use client IP to help isolate per-user behaviour within the tenant
         ident = self.get_ident(request)
 
         # Return unique cache key like "throttle_coffeechain_127.0.0.1"
