@@ -140,7 +140,3 @@ docker-compose.override.yml
 .pytest_cache/
 .coverage
 htmlcov/
-
-# Candidate work
-backend/
-frontend/

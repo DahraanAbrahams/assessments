@@ -1,3 +1,5 @@
+version: "3.9"
+
 services:
   coffeechain-mock:
     build: ./mocks/coffeechain
@@ -62,6 +64,7 @@ services:
       MYSQL_ROOT_PASSWORD: root
     volumes:
       - mysql_data:/var/lib/mysql
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
     networks:
       - loyalty-network
     healthcheck:
@@ -75,8 +78,9 @@ services:
       context: ./backend
     container_name: django-backend
     command: >
-      sh -c "python manage.py migrate &&
-             python manage.py seed_tenants &&
+      sh -c "./scripts/wait-for-it.sh mysql:3306 &&
+             python manage.py migrate &&
+             python seed.py &&
              python manage.py runserver 0.0.0.0:8000"
     volumes:
       - ./backend:/app
