@@ -1,5 +1,6 @@
 from pathlib import Path
 from decouple import config
+from corsheaders.defaults import default_headers, default_methods
 
 # ===================================================
 #               BASE DIRECTORY
@@ -32,6 +33,7 @@ INSTALLED_APPS = [
     # Third-party apps
     'rest_framework',
     "drf_yasg",
+    "corsheaders",
 
     # Project-specific apps
     "bookings",
@@ -43,6 +45,8 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
 
+    'corsheaders.middleware.CorsMiddleware',
+
     # Custom middleware for multi-tenant request handling
     "tenants.utils.middleware.TenantMiddleware",
 
@@ -51,6 +55,17 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+]
+
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+]
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    'X-Internal-Access',
+]
+
+CORS_ALLOW_METHODS = list(default_methods) + [
+    'OPTIONS',
 ]
 
 ROOT_URLCONF = "core.urls"
